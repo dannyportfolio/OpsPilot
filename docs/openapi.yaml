@@ -1,0 +1,470 @@
+openapi: 3.1.0
+info:
+  title: OpsPilot Reusable Task REST API
+  description: Reference implementation and reusable backend foundation for ERP/CRM business applications in Go with Authentication and RBAC.
+  version: 1.1.0
+servers:
+  - url: http://localhost:8080
+    description: Local development HTTP server
+  - url: https://{apiId}.execute-api.{region}.amazonaws.com/prod
+    description: AWS API Gateway (Serverless runtime)
+    variables:
+      apiId:
+        default: example
+      region:
+        default: us-east-1
+
+paths:
+  /health:
+    get:
+      summary: Service Health Check
+      description: Returns service operational status for load balancers and orchestrators. Unauthenticated.
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /auth/login:
+    post:
+      summary: User Authentication
+      description: Authenticates user credentials with brute-force rate-limiting and issues a signed HMAC-SHA256 Bearer JWT token.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/logout:
+    post:
+      summary: Token Revocation
+      description: Revokes the caller's active JWT token until expiration.
+      operationId: logout
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Successfully logged out
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /tasks:
+    get:
+      summary: List all tasks
+      description: Returns an array of tasks within the caller's tenant ordered by creation date descending.
+      operationId: listTasks
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of tasks for authenticated tenant
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      summary: Create a new task
+      description: Creates a new task bound to the authenticated tenant. Requires admin or member role.
+      operationId: createTask
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '201':
+          description: Task created successfully
+          headers:
+            Location:
+              description: URL of the created task resource
+              schema:
+                type: string
+                example: /tasks/c1f10842-83fe-43dc-9e87-a2f073285709
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /tasks/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: RFC 4122 v4 UUID of the task
+        schema:
+          type: string
+          format: uuid
+          example: c1f10842-83fe-43dc-9e87-a2f073285709
+
+    get:
+      summary: Get task details by ID
+      description: Retrieves a task by ID. Returns 404 if the task does not exist or belongs to another tenant.
+      operationId: getTaskById
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Task retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      summary: Update an existing task
+      description: Updates the title, description, and status of a task. Requires admin or member role. Returns 404 for cross-tenant access.
+      operationId: updateTask
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskRequest'
+      responses:
+        '200':
+          description: Task updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      summary: Delete a task by ID
+      description: Deletes the specified task by ID. Requires admin role. Returns 404 for cross-tenant access.
+      operationId: deleteTask
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Task deleted successfully (no content)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Cryptographic HMAC-SHA256 signed JWT token containing subject, tenant_id, role, and standard claims.
+
+  schemas:
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email
+          example: admin@opspilot.internal
+        password:
+          type: string
+          example: AdminSecure123!
+
+    UserResponse:
+      type: object
+      required:
+        - id
+        - tenant_id
+        - email
+        - role
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          example: default-tenant
+        email:
+          type: string
+          format: email
+          example: admin@opspilot.internal
+        role:
+          type: string
+          enum: [admin, member, viewer]
+        status:
+          type: string
+          enum: [active, suspended]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    LoginResponse:
+      type: object
+      required:
+        - token
+        - expires_at
+        - token_type
+        - user
+      properties:
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        token_type:
+          type: string
+          example: Bearer
+        user:
+          $ref: '#/components/schemas/UserResponse'
+
+    LogoutResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          example: logged_out
+
+    TaskStatus:
+      type: string
+      enum:
+        - pending
+        - in_progress
+        - completed
+      description: Current status in the task lifecycle.
+
+    Task:
+      type: object
+      required:
+        - id
+        - title
+        - description
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: c1f10842-83fe-43dc-9e87-a2f073285709
+        tenant_id:
+          type: string
+          example: default-tenant
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Build Serverless Go API
+        description:
+          type: string
+          maxLength: 2000
+          example: Implement decoupled REST handlers and in-memory repository
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+          example: in_progress
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-10-27T12:00:00Z'
+        updated_at:
+          type: string
+          format: date-time
+          example: '2026-10-27T12:00:00Z'
+
+    CreateTaskRequest:
+      type: object
+      required:
+        - title
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Build Serverless Go API
+        description:
+          type: string
+          maxLength: 2000
+          default: ''
+          example: Implement decoupled REST handlers and in-memory repository
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+          default: pending
+
+    UpdateTaskRequest:
+      type: object
+      required:
+        - title
+        - status
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Build Serverless Go API
+        description:
+          type: string
+          maxLength: 2000
+          default: ''
+          example: Updated implementation details
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+          example: completed
+
+    FieldError:
+      type: object
+      required:
+        - field
+        - message
+      properties:
+        field:
+          type: string
+          example: title
+        message:
+          type: string
+          example: title is required and cannot be empty
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          example: validation failed
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          example: ok
+
+  responses:
+    BadRequest:
+      description: Malformed JSON, unknown fields, or validation constraint violations
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Unauthorized:
+      description: Missing, invalid, expired, or revoked Bearer authentication token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Forbidden:
+      description: Insufficient RBAC role permissions or suspended user account
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    TooManyRequests:
+      description: Rate limit exceeded on authentication endpoint
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    NotFound:
+      description: The requested resource was not found within caller tenant boundary
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    InternalServerError:
+      description: Unhandled internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'

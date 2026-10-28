@@ -1,0 +1,35 @@
+schema: spec-driven
+
+# Project context
+# Defines non-negotiable domain, architecture, and verification constraints.
+context: |
+  Architecture & Language: Idiomatic Go (1.22+), standard library focused, zero unnecessary dependencies.
+  Domain Domain: Reusable ERP/CRM foundation with multi-tenancy boundaries, audit trails, and strict transaction handling.
+  Decoupling: HTTP routers return http.Handler, fully decoupled from server lifecycle for serverless and container portability.
+  Testing: Every business rule requires unit tests; every API endpoint requires table-driven httptest suites.
+
+# Per-artifact rules
+rules:
+  proposal:
+    - Keep proposals under 600 words, clearly stating business motivation and non-goals.
+    - Explicitly document multi-tenancy, data migration, and security boundary implications.
+  specs:
+    - Detail requirements with Given-When-Then acceptance scenarios.
+    - Specify validation boundaries (length limits, enum values, payload constraints).
+    - Map all error outcomes to consistent JSON error payloads and HTTP status codes.
+  tasks:
+    - Break implementation into small, atomic, verifiable tasks.
+    - Pair every implementation task with an automated test task.
+
+# Per-operation guidance
+operations:
+  apply:
+    guidance:
+      - Implement tasks incrementally without modifying unrelated files.
+      - Execute `go test -v ./...` and `go vet ./...` to verify each task before moving to the next.
+      - Never fabricate test results; record actual command output and execution time.
+  archive:
+    guidance:
+      - Confirm all acceptance criteria and tasks in tasks.md are completed.
+      - Verify no git regressions or untracked debris remain.
+      - Sync delta specs to main specification trees cleanly.

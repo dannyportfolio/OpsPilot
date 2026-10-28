@@ -1,0 +1,135 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  OpsPilot Reusable ERP/CRM Foundation - Serverless AWS Lambda & API Gateway deployment.
+
+Parameters:
+  AppEnvironment:
+    Type: String
+    Default: staging
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment stage environment.
+
+  DatabaseURL:
+    Type: String
+    NoEcho: true
+    Description: PostgreSQL connection string (e.g. postgres://user:password@rds-endpoint:5432/opspilot?sslmode=require).
+
+  JWTSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    Description: HMAC-SHA256 JWT signing secret key (minimum 32 characters).
+
+  VpcSubnetIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Comma-separated private subnet IDs for VPC-attached RDS access (leave empty for serverless non-VPC).
+
+  VpcSecurityGroupIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Comma-separated security group IDs for RDS access.
+
+Conditions:
+  HasVPC: !Not [!Equals [!Join ["", !Ref VpcSubnetIds], ""]]
+
+Globals:
+  Function:
+    Timeout: 20
+    MemorySize: 256
+    Architectures:
+      - arm64
+    Runtime: provided.al2023
+    Environment:
+      Variables:
+        STORAGE_DRIVER: postgres
+        DATABASE_URL: !Ref DatabaseURL
+        AUTH_JWT_SECRET: !Ref JWTSecret
+        AUTH_TOKEN_TTL_SECONDS: "3600"
+        LOG_LEVEL: INFO
+
+Resources:
+  OpsPilotHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: "$default"
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowHeaders:
+          - Authorization
+          - Content-Type
+          - X-Amzn-Trace-Id
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        MaxAge: 300
+
+  OpsPilotFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - !If
+          - HasVPC
+          - PolicyName: VPCAccessPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                    - ec2:AssignPrivateIpAddresses
+                    - ec2:UnassignPrivateIpAddresses
+                  Resource: "*"
+          - !Ref AWS::NoValue
+
+  OpsPilotFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: bootstrap
+      Role: !GetAtt OpsPilotFunctionRole.Arn
+      VpcConfig: !If
+        - HasVPC
+        - SubnetIds: !Ref VpcSubnetIds
+          SecurityGroupIds: !Ref VpcSecurityGroupIds
+        - !Ref AWS::NoValue
+      Events:
+        ProxyResource:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref OpsPilotHttpApi
+            Path: /{proxy+}
+            Method: ANY
+        RootResource:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref OpsPilotHttpApi
+            Path: /
+            Method: ANY
+
+Outputs:
+  HttpApiUrl:
+    Description: Base URL for Amazon API Gateway HTTP API
+    Value: !Sub "https://${OpsPilotHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+
+  FunctionArn:
+    Description: OpsPilot Lambda Function ARN
+    Value: !GetAtt OpsPilotFunction.Arn
