@@ -9,6 +9,7 @@ import (
 
 // Config holds environment-driven operational settings with safe defaults.
 type Config struct {
+	AppEnv        string
 	Port          string
 	DatabaseURL   string
 	StorageDriver string
@@ -19,6 +20,10 @@ type Config struct {
 
 // Load reads configuration from environment variables, applying safe defaults for local development.
 func Load() *Config {
+	appEnv := strings.ToLower(strings.TrimSpace(os.Getenv("APP_ENV")))
+	if appEnv == "" {
+		appEnv = "development"
+	}
 	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port == "" {
 		port = "8080"
@@ -44,6 +49,12 @@ func Load() *Config {
 		jwtSecret = "dev-secret-do-not-use-in-production-32-bytes-minimum"
 	}
 
+	if appEnv == "production" {
+		if jwtSecret == "dev-secret-do-not-use-in-production-32-bytes-minimum" || len(jwtSecret) < 32 {
+			panic("FATAL: AUTH_JWT_SECRET must be set to a secure secret of at least 32 bytes in production")
+		}
+	}
+
 	ttlSecondsStr := strings.TrimSpace(os.Getenv("AUTH_TOKEN_TTL_SECONDS"))
 	ttlSeconds, err := strconv.Atoi(ttlSecondsStr)
 	if err != nil || ttlSeconds <= 0 {
@@ -51,6 +62,7 @@ func Load() *Config {
 	}
 
 	return &Config{
+		AppEnv:        appEnv,
 		Port:          port,
 		DatabaseURL:   dbURL,
 		StorageDriver: driver,

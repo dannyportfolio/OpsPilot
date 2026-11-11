@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"opspilot/task-api/internal/auth"
+	"opspilot/task-api/internal/platform/tenant"
 )
 
 // MemoryRepository provides a thread-safe, in-memory implementation of the Repository interface.
@@ -35,14 +35,12 @@ func (r *MemoryRepository) Create(ctx context.Context, t Task) (Task, error) {
 		return Task{}, ErrAlreadyExists
 	}
 
-	// Defensive copy
+	// Defensive copy: enforce authenticated tenant context if present
 	item := t
-	if item.TenantID == "" {
-		if tenant, ok := auth.TenantFromContext(ctx); ok && tenant != "" {
-			item.TenantID = tenant
-		} else {
-			item.TenantID = "default"
-		}
+	if tenant, ok := tenant.FromContext(ctx); ok && tenant != "" {
+		item.TenantID = tenant
+	} else if item.TenantID == "" {
+		item.TenantID = "default"
 	}
 	r.tasks[item.ID] = item
 
@@ -63,7 +61,7 @@ func (r *MemoryRepository) GetByID(ctx context.Context, id string) (Task, error)
 		return Task{}, ErrNotFound
 	}
 
-	if tenant, ok := auth.TenantFromContext(ctx); ok && tenant != "" {
+	if tenant, ok := tenant.FromContext(ctx); ok && tenant != "" {
 		if task.TenantID != tenant {
 			return Task{}, ErrNotFound
 		}
@@ -82,7 +80,7 @@ func (r *MemoryRepository) List(ctx context.Context) ([]Task, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	tenant, hasTenant := auth.TenantFromContext(ctx)
+	tenant, hasTenant := tenant.FromContext(ctx)
 
 	result := make([]Task, 0, len(r.tasks))
 	for _, t := range r.tasks {
@@ -114,7 +112,7 @@ func (r *MemoryRepository) Update(ctx context.Context, t Task) (Task, error) {
 		return Task{}, ErrNotFound
 	}
 
-	if tenant, ok := auth.TenantFromContext(ctx); ok && tenant != "" {
+	if tenant, ok := tenant.FromContext(ctx); ok && tenant != "" {
 		if existing.TenantID != tenant {
 			return Task{}, ErrNotFound
 		}
@@ -147,7 +145,7 @@ func (r *MemoryRepository) Delete(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 
-	if tenant, ok := auth.TenantFromContext(ctx); ok && tenant != "" {
+	if tenant, ok := tenant.FromContext(ctx); ok && tenant != "" {
 		if existing.TenantID != tenant {
 			return ErrNotFound
 		}

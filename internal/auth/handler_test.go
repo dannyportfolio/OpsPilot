@@ -150,3 +150,112 @@ func TestAuthHandler_Logout(t *testing.T) {
 
 	_ = tokenSvc
 }
+
+func TestAuthHandler_RateLimit_SpoofedXFF(t *testing.T) {
+	router, svc, _, _ := setupAuthRouter()
+	ctx := context.Background()
+
+	_, err := svc.CreateUser(ctx, "tenant-1", "victim@example.com", "Password123!", auth.RoleMember)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	// An untrusted external caller (RemoteAddr: 198.51.100.1:54321) attempts brute force
+	// by spoofing different X-Forwarded-For headers on each request.
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBufferString(`{"email":"victim@example.com","password":"WrongPassword"}`))
+		req.RemoteAddr = "198.51.100.1:54321"
+		req.Header.Set("X-Forwarded-For", "203.0.113."+string(rune('1'+i)))
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: expected 401 Unauthorized, got %d", i+1, rec.Code)
+		}
+	}
+
+	// 6th attempt from the same RemoteAddr with yet another spoofed IP MUST be blocked (429)
+	req6 := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBufferString(`{"email":"victim@example.com","password":"WrongPassword"}`))
+	req6.RemoteAddr = "198.51.100.1:54321"
+	req6.Header.Set("X-Forwarded-For", "203.0.113.99")
+	rec6 := httptest.NewRecorder()
+
+	router.ServeHTTP(rec6, req6)
+	if rec6.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429 Too Many Requests after 5 failures despite spoofed XFF, got %d", rec6.Code)
+	}
+}
+
+func TestAuthHandler_UserManagementAndProfile(t *testing.T) {
+	router, svc, tokenSvc, _ := setupAuthRouter()
+	ctx := context.Background()
+
+	// Seed admin and member
+	adminUser, err := svc.CreateUser(ctx, "tenant-test", "admin@tenant.com", "AdminPass123!", auth.RoleAdmin)
+	if err != nil {
+		t.Fatalf("failed to create admin: %v", err)
+	}
+	memberUser, err := svc.CreateUser(ctx, "tenant-test", "member@tenant.com", "MemberPass123!", auth.RoleMember)
+	if err != nil {
+		t.Fatalf("failed to create member: %v", err)
+	}
+
+	adminToken, _, _ := tokenSvc.GenerateToken(auth.User{
+		ID:       adminUser.ID,
+		TenantID: adminUser.TenantID,
+		Email:    adminUser.Email,
+		Role:     auth.RoleAdmin,
+	})
+	memberToken, _, _ := tokenSvc.GenerateToken(auth.User{
+		ID:       memberUser.ID,
+		TenantID: memberUser.TenantID,
+		Email:    memberUser.Email,
+		Role:     auth.RoleMember,
+	})
+
+	// 1. Admin creates new user via POST /auth/users
+	newUserPayload := `{"email":"newhire@tenant.com","password":"NewHirePass123!","role":"member"}`
+	reqCreate := httptest.NewRequest(http.MethodPost, "/auth/users", bytes.NewBufferString(newUserPayload))
+	reqCreate.Header.Set("Authorization", "Bearer "+adminToken)
+	recCreate := httptest.NewRecorder()
+	router.ServeHTTP(recCreate, reqCreate)
+
+	if recCreate.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created for admin user creation, got %d, body: %s", recCreate.Code, recCreate.Body.String())
+	}
+
+	var createdResp auth.UserResponse
+	if err := json.Unmarshal(recCreate.Body.Bytes(), &createdResp); err != nil {
+		t.Fatalf("failed to decode created user: %v", err)
+	}
+	if createdResp.Email != "newhire@tenant.com" || createdResp.TenantID != "tenant-test" {
+		t.Errorf("mismatched user attributes: %+v", createdResp)
+	}
+
+	// 2. Member calling POST /auth/users is rejected (403 Forbidden)
+	reqForbidden := httptest.NewRequest(http.MethodPost, "/auth/users", bytes.NewBufferString(newUserPayload))
+	reqForbidden.Header.Set("Authorization", "Bearer "+memberToken)
+	recForbidden := httptest.NewRecorder()
+	router.ServeHTTP(recForbidden, reqForbidden)
+
+	if recForbidden.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for member user creation, got %d", recForbidden.Code)
+	}
+
+	// 3. User calls GET /auth/me
+	reqMe := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	reqMe.Header.Set("Authorization", "Bearer "+memberToken)
+	recMe := httptest.NewRecorder()
+	router.ServeHTTP(recMe, reqMe)
+
+	if recMe.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for GET /auth/me, got %d", recMe.Code)
+	}
+	var meResp auth.UserResponse
+	if err := json.Unmarshal(recMe.Body.Bytes(), &meResp); err != nil {
+		t.Fatalf("failed to decode profile: %v", err)
+	}
+	if meResp.ID != memberUser.ID || meResp.Email != "member@tenant.com" {
+		t.Errorf("unexpected profile data: %+v", meResp)
+	}
+}

@@ -131,3 +131,55 @@ func TestAuthService_RateLimiting(t *testing.T) {
 		t.Errorf("expected ErrRateLimitExceeded, got: %v", err)
 	}
 }
+
+func TestAuthService_MultiTenantLoginAmbiguity(t *testing.T) {
+	repo := auth.NewMemoryUserRepository()
+	tokenSvc, _ := auth.NewTokenService("test-secret-at-least-32-bytes-long", "opspilot", "opspilot-api", 1*time.Hour)
+	svc := auth.NewService(repo, tokenSvc, nil, nil, nil)
+	ctx := context.Background()
+
+	// Register same email in two different tenants
+	_, err := svc.CreateUser(ctx, "tenant-alpha", "shared@example.com", "PasswordAlpha123!", auth.RoleAdmin)
+	if err != nil {
+		t.Fatalf("failed to create alpha user: %v", err)
+	}
+	_, err = svc.CreateUser(ctx, "tenant-beta", "shared@example.com", "PasswordBeta123!", auth.RoleAdmin)
+	if err != nil {
+		t.Fatalf("failed to create beta user: %v", err)
+	}
+
+	// 1. Attempt login without tenant_id -> should return ErrAmbiguousUser
+	_, err = svc.Login(ctx, auth.LoginRequest{
+		Email:    "shared@example.com",
+		Password: "PasswordAlpha123!",
+	}, "127.0.0.1")
+	if err != auth.ErrAmbiguousUser {
+		t.Errorf("expected ErrAmbiguousUser when logging in without tenant_id for shared email, got: %v", err)
+	}
+
+	// 2. Login with explicit tenant_alpha -> successful
+	respAlpha, err := svc.Login(ctx, auth.LoginRequest{
+		TenantID: "tenant-alpha",
+		Email:    "shared@example.com",
+		Password: "PasswordAlpha123!",
+	}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("expected successful login for tenant-alpha, got: %v", err)
+	}
+	if respAlpha.User.TenantID != "tenant-alpha" {
+		t.Errorf("expected user tenant tenant-alpha, got %s", respAlpha.User.TenantID)
+	}
+
+	// 3. Login with explicit tenant_beta -> successful
+	respBeta, err := svc.Login(ctx, auth.LoginRequest{
+		TenantID: "tenant-beta",
+		Email:    "shared@example.com",
+		Password: "PasswordBeta123!",
+	}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("expected successful login for tenant-beta, got: %v", err)
+	}
+	if respBeta.User.TenantID != "tenant-beta" {
+		t.Errorf("expected user tenant tenant-beta, got %s", respBeta.User.TenantID)
+	}
+}

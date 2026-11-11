@@ -56,14 +56,36 @@ func (r *MemoryUserRepository) GetByID(ctx context.Context, id string) (User, er
 	return u, nil
 }
 
-// GetByEmail retrieves a user by their unique email.
+// GetByEmail retrieves a user by email across all tenants. If multiple tenants share the email, ErrAmbiguousUser is returned.
 func (r *MemoryUserRepository) GetByEmail(ctx context.Context, email string) (User, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	normEmail := strings.ToLower(strings.TrimSpace(email))
+	var matches []User
 	for _, u := range r.users {
 		if strings.ToLower(u.Email) == normEmail {
+			matches = append(matches, u)
+		}
+	}
+
+	if len(matches) == 0 {
+		return User{}, ErrUserNotFound
+	}
+	if len(matches) > 1 {
+		return User{}, ErrAmbiguousUser
+	}
+	return matches[0], nil
+}
+
+// GetByTenantAndEmail retrieves a user by tenant identifier and email.
+func (r *MemoryUserRepository) GetByTenantAndEmail(ctx context.Context, tenantID, email string) (User, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	normEmail := strings.ToLower(strings.TrimSpace(email))
+	for _, u := range r.users {
+		if u.TenantID == tenantID && strings.ToLower(u.Email) == normEmail {
 			return u, nil
 		}
 	}

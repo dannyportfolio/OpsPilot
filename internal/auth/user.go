@@ -21,6 +21,7 @@ var (
 	ErrTokenExpired       = errors.New("invalid or expired token")
 	ErrRateLimitExceeded  = errors.New("too many requests")
 	ErrInvalidInput       = errors.New("invalid input")
+	ErrAmbiguousUser      = errors.New("multiple accounts found with this email; please specify tenant_id")
 )
 
 // Role represents a user's RBAC role.

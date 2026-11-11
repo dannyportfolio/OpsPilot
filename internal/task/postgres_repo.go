@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"opspilot/task-api/internal/auth"
+	"opspilot/task-api/internal/platform/tenant"
 )
 
 // PostgresRepository provides a PostgreSQL persistence adapter conforming to task.Repository.
@@ -34,7 +34,7 @@ func NewPostgresRepositoryWithTenant(db *sql.DB, tenantID string) *PostgresRepos
 }
 
 func (r *PostgresRepository) effectiveTenant(ctx context.Context) string {
-	if tenant, ok := auth.TenantFromContext(ctx); ok && tenant != "" {
+	if tenant, ok := tenant.FromContext(ctx); ok && tenant != "" {
 		return tenant
 	}
 	return r.tenantID
@@ -47,7 +47,9 @@ func (r *PostgresRepository) Create(ctx context.Context, t Task) (Task, error) {
 	}
 
 	tenantID := r.effectiveTenant(ctx)
-	if t.TenantID != "" {
+	if tenant, ok := tenant.FromContext(ctx); ok && tenant != "" {
+		tenantID = tenant
+	} else if t.TenantID != "" {
 		tenantID = t.TenantID
 	}
 

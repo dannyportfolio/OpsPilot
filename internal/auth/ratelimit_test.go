@@ -59,3 +59,24 @@ func TestMemoryRateLimiter_Concurrency(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestMemoryRateLimiter_Cleanup(t *testing.T) {
+	window := 50 * time.Millisecond
+	limiter := auth.NewMemoryRateLimiter(5, window, window)
+
+	limiter.RecordFailure("temp-key-1")
+	limiter.RecordFailure("temp-key-2")
+
+	if limiter.Count() != 2 {
+		t.Fatalf("expected 2 keys recorded, got %d", limiter.Count())
+	}
+
+	// Wait for window to expire
+	time.Sleep(70 * time.Millisecond)
+
+	limiter.Cleanup()
+
+	if limiter.Count() != 0 {
+		t.Errorf("expected 0 keys after cleanup of expired entries, got %d", limiter.Count())
+	}
+}

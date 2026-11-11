@@ -6,7 +6,7 @@ Enables running the OpsPilot backend on AWS Lambda and Amazon API Gateway, trans
 ## Requirements
 
 ### Requirement: AWS Lambda API Gateway HTTP Proxy Event Translation
-The system SHALL translate Amazon API Gateway HTTP API (payload format v2.0) and REST API proxy events into standard library `http.Request` instances, route them through the secured application `http.Handler`, and map HTTP responses into API Gateway response structures preserving status codes, headers, and response bodies.
+The system SHALL translate Amazon API Gateway HTTP API proxy events into standard library `http.Request` instances, route them through the secured application `http.Handler` assembled via the shared application composition root, and map HTTP responses into API Gateway response structures preserving status codes, headers, and response bodies.
 
 #### Scenario: Successful GET request translation
 - **WHEN** API Gateway triggers the Lambda handler with an HTTP GET request event
@@ -39,8 +39,12 @@ The system SHALL initialize the database connection pool in package or global in
 - **THEN** the adapter reuses the existing database connection pool without establishing new physical TCP connections
 
 ### Requirement: SAM Infrastructure as Code and Least-Privilege IAM
-The system SHALL provide an AWS Serverless Application Model (SAM) configuration targeting the `provided.al2023` runtime, compiling a standalone Go `bootstrap` binary, routing all HTTP methods and paths via API Gateway HTTP API, and restricting IAM permissions to VPC network interface creation and structured CloudWatch log writing.
+The system SHALL provide an AWS Serverless Application Model (SAM) configuration targeting the `provided.al2023` runtime, compiling a standalone Go `bootstrap` binary, routing all HTTP methods and paths via API Gateway HTTP API, restricting IAM permissions, and parameterizing CORS `AllowOrigins`.
 
 #### Scenario: Least-privilege IAM policy definition
 - **WHEN** the SAM template is validated
 - **THEN** the function role grants only `AWSLambdaBasicExecutionRole` and VPC interface attachment permissions without wildcard administrative capabilities
+
+#### Scenario: Configurable CORS origins
+- **WHEN** the SAM template is deployed with specified authorized origins
+- **THEN** API Gateway configures CORS AllowOrigins to match the configured parameter rather than an unrestricted wildcard

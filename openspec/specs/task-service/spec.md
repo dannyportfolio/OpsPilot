@@ -6,7 +6,7 @@ Provides a reusable backend service foundation for ERP and CRM tasks, managing t
 ## Requirements
 
 ### Requirement: Task Entity Lifecycle Management
-The system SHALL maintain task entities with an RFC 4122 v4 UUID, title, description, status enum, and UTC timestamps. The status enum SHALL only accept `pending`, `in_progress`, and `completed`.
+The system SHALL maintain task entities with an RFC 4122 v4 UUID, title, description, status enum, and UTC timestamps. The domain entity SHALL represent pure business state independent of external transport formats, while transport adapters manage DTO serialization.
 
 #### Scenario: Default status on creation
 - **WHEN** a task is created without specifying a status
@@ -81,3 +81,14 @@ The system SHALL expose `GET /health` to report service operational health for c
 #### Scenario: Health check probe
 - **WHEN** an orchestrator sends `GET /health`
 - **THEN** the system returns HTTP status 200 OK with body `{"status": "ok"}`
+
+### Requirement: Strict Tenant Context Requirement
+The system SHALL require an authenticated tenant context for all task mutations and queries, rejecting requests without a validated tenant rather than falling back to default shared storage.
+
+#### Scenario: Missing tenant context rejected
+- **WHEN** a task creation, retrieval, update, or deletion is attempted without a valid tenant context
+- **THEN** the system rejects the operation with an explicit error rather than defaulting to "default"
+
+#### Scenario: Tenant isolation during task queries
+- **WHEN** an authenticated user creates or queries tasks
+- **THEN** all storage operations strictly filter by the authenticated tenant_id, preventing any cross-tenant data leakage

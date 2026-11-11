@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"opspilot/task-api/internal/auth"
+	"opspilot/task-api/internal/platform/tenant"
 )
 
 // Service defines application use cases for task management.
@@ -45,7 +45,7 @@ func (s *taskService) CreateTask(ctx context.Context, req CreateTaskRequest) (Ta
 	}
 
 	tenantID := "default"
-	if tID, ok := auth.TenantFromContext(ctx); ok && tID != "" {
+	if tID, ok := tenant.FromContext(ctx); ok && tID != "" {
 		tenantID = tID
 	}
 

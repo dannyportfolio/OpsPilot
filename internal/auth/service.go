@@ -5,12 +5,13 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"log/slog"
+	"strings"
 	"time"
 )
 
 // LoginRequest contains credentials submitted during authentication.
 type LoginRequest struct {
+	TenantID string `json:"tenant_id,omitempty"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
@@ -31,12 +32,19 @@ type Service interface {
 	GetProfile(ctx context.Context, userID string) (UserResponse, error)
 }
 
+// AuditLogger defines the interface for recording security and access events.
+type AuditLogger interface {
+	Info(msg string, args ...any)
+	Warn(msg string, args ...any)
+	Error(msg string, args ...any)
+}
+
 type authService struct {
 	repo            UserRepository
 	tokenService    TokenService
 	revocationStore RevocationStore
 	rateLimiter     RateLimiter
-	logger          *slog.Logger
+	logger          AuditLogger
 }
 
 // NewService constructs a new AuthService instance.
@@ -45,7 +53,7 @@ func NewService(
 	tokenSvc TokenService,
 	revStore RevocationStore,
 	limiter RateLimiter,
-	logger *slog.Logger,
+	logger AuditLogger,
 ) Service {
 	return &authService{
 		repo:            repo,
@@ -75,20 +83,32 @@ func (s *authService) Login(ctx context.Context, req LoginRequest, clientIP stri
 		return LoginResponse{}, ErrRateLimitExceeded
 	}
 
-	user, err := s.repo.GetByEmail(ctx, normEmail)
+	var user User
+	trimmedTenant := strings.TrimSpace(req.TenantID)
+	if trimmedTenant != "" {
+		user, err = s.repo.GetByTenantAndEmail(ctx, trimmedTenant, normEmail)
+	} else {
+		user, err = s.repo.GetByEmail(ctx, normEmail)
+	}
+
 	if err != nil {
-		if errors.Is(err, ErrUserNotFound) {
+		if errors.Is(err, ErrUserNotFound) || errors.Is(err, ErrAmbiguousUser) {
 			// Perform dummy hash comparison to mitigate timing attacks
 			_ = CheckPassword("$2a$12$e80yq7KjB8aG05hTqYpTRe1gXN3u3.2j3f2Ld5mHnUv3W6qWbE3aK", req.Password)
 			if s.rateLimiter != nil {
 				s.rateLimiter.RecordFailure(rateKey)
 			}
 			if s.logger != nil {
-				s.logger.Warn("login failed: unknown user",
+				s.logger.Warn("login failed",
 					"action", "auth.login_failed",
 					"email", normEmail,
+					"tenant_id", trimmedTenant,
 					"client_ip", clientIP,
+					"reason", err.Error(),
 				)
+			}
+			if errors.Is(err, ErrAmbiguousUser) {
+				return LoginResponse{}, ErrAmbiguousUser
 			}
 			return LoginResponse{}, ErrInvalidCredentials
 		}

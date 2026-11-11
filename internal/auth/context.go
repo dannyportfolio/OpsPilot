@@ -1,14 +1,22 @@
 package auth
 
-import "context"
+import (
+	"context"
+
+	"opspilot/task-api/internal/platform/tenant"
+)
 
 type contextKey string
 
 const userContextKey contextKey = "opspilot.auth.user"
 
-// WithUser adds validated user claims to the request context.
+// WithUser adds validated user claims and sets the platform tenant context.
 func WithUser(ctx context.Context, claims Claims) context.Context {
-	return context.WithValue(ctx, userContextKey, claims)
+	ctx = context.WithValue(ctx, userContextKey, claims)
+	if claims.TenantID != "" {
+		ctx = tenant.WithTenant(ctx, claims.TenantID)
+	}
+	return ctx
 }
 
 // UserFromContext retrieves authenticated user claims from context.
@@ -24,8 +32,11 @@ func UserFromContext(ctx context.Context) (*Claims, bool) {
 	return &claims, true
 }
 
-// TenantFromContext retrieves the tenant ID from the authenticated user claims.
+// TenantFromContext retrieves the tenant ID from the context, checking the platform tenant first.
 func TenantFromContext(ctx context.Context) (string, bool) {
+	if tID, ok := tenant.FromContext(ctx); ok && tID != "" {
+		return tID, true
+	}
 	claims, ok := UserFromContext(ctx)
 	if !ok || claims.TenantID == "" {
 		return "", false

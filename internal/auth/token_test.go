@@ -117,3 +117,10 @@ func TestTokenService_IssuerAndAudienceValidation(t *testing.T) {
 		t.Error("expected error validating token with mismatched audience")
 	}
 }
+
+func TestTokenService_ShortSecret(t *testing.T) {
+	_, err := auth.NewTokenService("short-secret-less-than-32-bytes", "issuer", "audience", 1*time.Hour)
+	if err == nil {
+		t.Error("expected error creating TokenService with secret shorter than 32 bytes")
+	}
+}

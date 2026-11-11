@@ -46,8 +46,8 @@ type jwtTokenService struct {
 
 // NewTokenService creates a new JWT token service with specified secret, issuer, audience, and TTL.
 func NewTokenService(secret string, issuer, audience string, ttl time.Duration) (TokenService, error) {
-	if len(secret) < 16 {
-		return nil, errors.New("jwt secret must be at least 16 bytes")
+	if len(secret) < 32 {
+		return nil, errors.New("jwt secret must be at least 32 bytes (256 bits)")
 	}
 	if issuer == "" {
 		issuer = DefaultIssuer

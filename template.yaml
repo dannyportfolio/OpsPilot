@@ -34,6 +34,11 @@ Parameters:
     Default: ""
     Description: Comma-separated security group IDs for RDS access.
 
+  CorsAllowedOrigins:
+    Type: CommaDelimitedList
+    Default: "https://app.opspilot.internal"
+    Description: Comma-separated list of allowed origins for CORS.
+
 Conditions:
   HasVPC: !Not [!Equals [!Join ["", !Ref VpcSubnetIds], ""]]
 
@@ -58,8 +63,7 @@ Resources:
     Properties:
       StageName: "$default"
       CorsConfiguration:
-        AllowOrigins:
-          - "*"
+        AllowOrigins: !Ref CorsAllowedOrigins
         AllowHeaders:
           - Authorization
           - Content-Type

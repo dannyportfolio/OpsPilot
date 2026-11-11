@@ -1,12 +1,11 @@
 package task
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 
+	"opspilot/task-api/internal/platform/httputil"
 	"opspilot/task-api/internal/platform/response"
 )
 
@@ -139,29 +138,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// decodeJSON strictly decodes incoming JSON payloads.
-// It enforces 1 MB body boundary, rejects unknown fields, empty payloads, and multiple/trailing data.
+// decodeJSON delegates strictly to the platform JSON decoder.
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
-	if r.Body == nil {
-		return errors.New("request body is empty")
-	}
-	defer r.Body.Close()
-
-	// 1 MB payload limit bound
-	limitedReader := http.MaxBytesReader(w, r.Body, 1<<20)
-
-	decoder := json.NewDecoder(limitedReader)
-	decoder.DisallowUnknownFields()
-
-	if err := decoder.Decode(dst); err != nil {
-		return err
-	}
-
-	// Ensure there are no additional JSON tokens
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return errors.New("request body contains multiple JSON values or extra data")
-	}
-
-	return nil
+	return httputil.DecodeJSON(w, r, dst, httputil.DefaultMaxBodyBytes)
 }

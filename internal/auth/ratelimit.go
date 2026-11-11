@@ -10,6 +10,8 @@ type RateLimiter interface {
 	Allow(key string) bool
 	RecordFailure(key string)
 	Reset(key string)
+	Cleanup()
+	Count() int
 }
 
 type attemptInfo struct {
@@ -91,6 +93,11 @@ func (rl *MemoryRateLimiter) RecordFailure(key string) {
 	if len(info.failures) >= rl.maxFailures {
 		info.blockedTo = now.Add(rl.blockDuration)
 	}
+
+	// Active eviction check: prune stale entries to bound memory footprint
+	if len(rl.attempts) > 100 {
+		rl.pruneLocked(now)
+	}
 }
 
 // Reset clears recorded failures for a key (e.g. upon successful login).
@@ -99,4 +106,39 @@ func (rl *MemoryRateLimiter) Reset(key string) {
 	defer rl.mu.Unlock()
 
 	delete(rl.attempts, key)
+}
+
+// Cleanup evicts expired rate limiter records to prevent unbounded memory growth.
+func (rl *MemoryRateLimiter) Cleanup() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	rl.pruneLocked(time.Now().UTC())
+}
+
+func (rl *MemoryRateLimiter) pruneLocked(now time.Time) {
+	cutoff := now.Add(-rl.window)
+	for key, info := range rl.attempts {
+		if !info.blockedTo.IsZero() && info.blockedTo.After(now) {
+			continue // Still blocked
+		}
+		hasActiveFailures := false
+		for _, t := range info.failures {
+			if t.After(cutoff) {
+				hasActiveFailures = true
+				break
+			}
+		}
+		if !hasActiveFailures {
+			delete(rl.attempts, key)
+		}
+	}
+}
+
+// Count returns the number of active tracked keys.
+func (rl *MemoryRateLimiter) Count() int {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	return len(rl.attempts)
 }
